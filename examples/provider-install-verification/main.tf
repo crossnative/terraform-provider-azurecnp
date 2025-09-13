@@ -1,11 +1,11 @@
 terraform {
   required_providers {
-    hashicups = {
+    azurecnp = {
       source = "hashicorp.com/edu/azurecnp"
     }
   }
 }
 
-provider "hashicups" {}
+provider "azurecnp" {}
 
-data "hashicups_coffees" "example" {}
+data "azurecnp_coffees" "example" {}
