@@ -6,6 +6,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/managementgroups/armmanagementgroups"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -171,7 +172,17 @@ func (p *azurecnProvider) Configure(ctx context.Context, req provider.ConfigureR
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to create Azure API Credentials", err.Error())
 	}
-	clientFactory, err := armmanagementgroups.NewClientFactory(credentials, nil)
+	managementGroupFactory, err := armmanagementgroups.NewClientFactory(credentials, nil)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Unable to Create Azure API Client factory",
+			"An unexpected error occurred when creating the Azure API client factory. "+
+				"If the error is not clear, please contact the provider developers.\n\n"+
+				"Azure Client Error: "+err.Error(),
+		)
+		return
+	}
+	subscrioptionFactory, err := armsubscription.NewClientFactory(credentials, nil)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Unable to Create Azure API Client factory",
@@ -182,10 +193,14 @@ func (p *azurecnProvider) Configure(ctx context.Context, req provider.ConfigureR
 		return
 	}
 
+	var holder = ClientFactoryHolder{
+		managementGroupClientFactory: managementGroupFactory,
+		subscriptionClientFactory:    subscrioptionFactory,
+	}
 	// Make the HashiCups client available during DataSource and Resource
 	// type Configure methods.
-	resp.DataSourceData = clientFactory
-	resp.ResourceData = clientFactory
+	resp.DataSourceData = &holder
+	resp.ResourceData = &holder
 }
 
 // DataSources defines the data sources implemented in the provider.
@@ -198,4 +213,9 @@ func (p *azurecnProvider) Resources(_ context.Context) []func() resource.Resourc
 	return []func() resource.Resource{
 		NewSubscriptionPoolResource,
 	}
+}
+
+type ClientFactoryHolder struct { //TODO there gotta be a better way to move the client factories around
+	managementGroupClientFactory *armmanagementgroups.ClientFactory
+	subscriptionClientFactory    *armsubscription.ClientFactory
 }

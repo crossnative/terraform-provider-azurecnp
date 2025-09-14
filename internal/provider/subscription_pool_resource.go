@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/managementgroups/armmanagementgroups"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -23,7 +23,7 @@ func NewSubscriptionPoolResource() resource.Resource {
 
 // subscriptionPoolResource is the resource implementation.
 type subscriptionPoolResource struct {
-	clientFactory *armmanagementgroups.ClientFactory
+	clientFactoryHolder *ClientFactoryHolder
 }
 
 type subscriptionPoolResourceModel struct {
@@ -74,18 +74,18 @@ func (r *subscriptionPoolResource) Configure(_ context.Context, req resource.Con
 		return
 	}
 
-	clientFactory, ok := req.ProviderData.(*armmanagementgroups.ClientFactory)
+	clientFactory, ok := req.ProviderData.(*ClientFactoryHolder)
 
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Unexpected Data Source Configure Type",
-			fmt.Sprintf("Expected *hashicups.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+			fmt.Sprintf("Expected *provider.ClientFactoryHolder, got: %T. Please report this issue to the provider developers.", req.ProviderData),
 		)
 
 		return
 	}
 
-	r.clientFactory = clientFactory
+	r.clientFactoryHolder = clientFactory
 }
 
 // Create a new resource.
@@ -101,17 +101,23 @@ func (r *subscriptionPoolResource) Create(ctx context.Context, req resource.Crea
 	//TODO check if subscription is in pool
 
 	// Associate Subscription
-	response, err := r.clientFactory.NewManagementGroupSubscriptionsClient().Create(context.Background(), plan.TargetManagementGroupName.ValueString(), plan.SubscriptionId.ValueString(), nil)
+	response, err := r.clientFactoryHolder.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().Create(context.Background(), plan.TargetManagementGroupName.ValueString(), plan.SubscriptionId.ValueString(), nil)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error moving subscription", err.Error(),
 		)
 		return
 	}
-	plan.ActualSubscriptionName = types.StringValue(*response.Properties.DisplayName)
 	plan.ActualParentManagementGroup = plan.TargetManagementGroupName
 
-	//TODO rename subscription
+	_, err = r.clientFactoryHolder.subscriptionClientFactory.NewClient().Rename(context.Background(), plan.SubscriptionId.ValueString(), armsubscription.Name{SubscriptionName: plan.NewSubscriptionName.ValueStringPointer()}, nil)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error renaming subscription", err.Error(),
+		)
+		return
+	}
+	plan.ActualSubscriptionName = types.StringValue(*response.Properties.DisplayName)
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
@@ -133,7 +139,7 @@ func (r *subscriptionPoolResource) Read(ctx context.Context, req resource.ReadRe
 
 	// Get refreshed order value from HashiCups
 	var isInPool bool = false
-	response, err := r.clientFactory.NewManagementGroupSubscriptionsClient().GetSubscription(context.Background(), state.PoolManagementGroupName.ValueString(), state.SubscriptionId.ValueString(), nil)
+	response, err := r.clientFactoryHolder.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().GetSubscription(context.Background(), state.PoolManagementGroupName.ValueString(), state.SubscriptionId.ValueString(), nil)
 	if err == nil {
 		//TODO actually check if its a 404 to be sure
 		isInPool = true
@@ -142,7 +148,7 @@ func (r *subscriptionPoolResource) Read(ctx context.Context, req resource.ReadRe
 
 	var isInTarget bool = false
 	if !isInPool {
-		response, err := r.clientFactory.NewManagementGroupSubscriptionsClient().GetSubscription(context.Background(), state.TargetManagementGroupName.ValueString(), state.SubscriptionId.ValueString(), nil)
+		response, err := r.clientFactoryHolder.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().GetSubscription(context.Background(), state.TargetManagementGroupName.ValueString(), state.SubscriptionId.ValueString(), nil)
 		if err == nil {
 			isInTarget = true
 			state.ActualSubscriptionName = types.StringValue(*response.Properties.DisplayName)
