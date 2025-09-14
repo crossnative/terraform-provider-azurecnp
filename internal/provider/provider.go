@@ -212,6 +212,7 @@ func (p *azurecnProvider) DataSources(_ context.Context) []func() datasource.Dat
 func (p *azurecnProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewSubscriptionPoolResource,
+		NewSubscriptionPoolLeaseResource,
 	}
 }
 
