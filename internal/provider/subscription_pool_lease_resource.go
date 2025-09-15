@@ -263,4 +263,33 @@ func (r *subscriptionPoolLeaseResource) Update(ctx context.Context, req resource
 
 // Delete deletes the resource and removes the Terraform state on success.
 func (r *subscriptionPoolLeaseResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var state subscriptionPoolLeaseResourceModel
+	diags := req.State.Get(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	_, err := r.clientFactoryHolder.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().Create(context.Background(), state.PoolManagementGroupName.ValueString(), state.SubscriptionId.ValueString(), nil)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error during Subscription Move",
+			err.Error(),
+		)
+		return
+	}
+
+	newSubscriptionName := truncateString(state.PoolSubscriptionPrefix.ValueString()+state.SubscriptionId.ValueString(), 64)
+	_, err = r.clientFactoryHolder.subscriptionClientFactory.NewClient().Rename(context.Background(), state.SubscriptionId.ValueString(), armsubscription.Name{SubscriptionName: &newSubscriptionName}, nil)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error during Subscription Rename",
+			err.Error(),
+		)
+		return
+	}
+}
+
+func truncateString(s string, max int) string {
+	return s[:max]
 }
