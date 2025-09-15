@@ -7,6 +7,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/managementgroups/armmanagementgroups"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -16,8 +17,9 @@ import (
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
-	_ resource.Resource              = &subscriptionPoolLeaseResource{}
-	_ resource.ResourceWithConfigure = &subscriptionPoolLeaseResource{}
+	_ resource.Resource                = &subscriptionPoolLeaseResource{}
+	_ resource.ResourceWithConfigure   = &subscriptionPoolLeaseResource{}
+	_ resource.ResourceWithImportState = &subscriptionPoolLeaseResource{}
 )
 
 // NewSubscriptionPoolResource is a helper function to simplify the provider implementation.
@@ -288,6 +290,11 @@ func (r *subscriptionPoolLeaseResource) Delete(ctx context.Context, req resource
 		)
 		return
 	}
+}
+
+func (r *subscriptionPoolLeaseResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	// Retrieve import ID and save to id attribute
+	resource.ImportStatePassthroughID(ctx, path.Root("subscription_id"), req, resp)
 }
 
 func truncateString(s string, max int) string {
