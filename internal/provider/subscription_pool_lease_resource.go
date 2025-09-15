@@ -134,7 +134,7 @@ root:
 		)
 		return
 	}
-	plan.ActualParentManagementGroup = plan.TargetManagementGroupName
+	plan.ActualParentManagementGroup = types.StringValue(plan.TargetManagementGroupName.ValueString())
 
 	_, err = r.clientFactoryHolder.subscriptionClientFactory.NewClient().Rename(context.Background(), *matchingSubscription.Name, armsubscription.Name{SubscriptionName: plan.TargetSubscriptionName.ValueStringPointer()}, nil)
 	if err != nil {
@@ -187,7 +187,7 @@ root:
 		return
 	}
 	state.ActualParentManagementGroup = types.StringValue(strings.TrimPrefix(*matchingEntity.Properties.Parent.ID, "/providers/Microsoft.Management/managementGroups/"))
-	state.TargetSubscriptionName = types.StringValue(*matchingEntity.Name)
+	state.TargetSubscriptionName = types.StringValue(*matchingEntity.Properties.DisplayName)
 
 	// Set refreshed state
 	diags = resp.State.Set(ctx, &state)
@@ -199,6 +199,61 @@ root:
 
 // Update updates the resource and sets the updated Terraform state on success.
 func (r *subscriptionPoolLeaseResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	// Retrieve values from plan
+	var plan subscriptionPoolLeaseResourceModel
+	diags := req.Plan.Get(ctx, &plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	var state subscriptionPoolLeaseResourceModel
+	diags = req.State.Get(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	sub, err := r.clientFactoryHolder.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().GetSubscription(context.Background(), state.ActualParentManagementGroup.ValueString(), state.SubscriptionId.ValueString(), nil)
+	if err != nil {
+		//TODO check for 404 or differente error
+		resp.Diagnostics.AddError(
+			"Broken State",
+			fmt.Sprintf("Could not find Subscription '%s' under ManagementGroup '%s'\nAzure API Error: %s", state.SubscriptionId.ValueString(), state.ActualParentManagementGroup.ValueString(), err.Error()),
+		)
+		return
+	}
+
+	if state.ActualParentManagementGroup.ValueString() != plan.TargetManagementGroupName.ValueString() {
+		_, err := r.clientFactoryHolder.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().Create(ctx, plan.TargetManagementGroupName.ValueString(), *sub.Name, nil)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error during Subscription Move",
+				err.Error(),
+			)
+			return
+		}
+	}
+	plan.ActualParentManagementGroup = types.StringValue(plan.TargetManagementGroupName.ValueString())
+
+	if plan.TargetSubscriptionName.ValueString() != *sub.Properties.DisplayName {
+		_, err := r.clientFactoryHolder.subscriptionClientFactory.NewClient().Rename(context.Background(), state.SubscriptionId.ValueString(), armsubscription.Name{SubscriptionName: plan.TargetSubscriptionName.ValueStringPointer()}, nil)
+		if err != nil {
+			//TODO handle retry on 429
+			resp.Diagnostics.AddError(
+				"Error during Subscription Rename",
+				err.Error(),
+			)
+			return
+		}
+		plan.TargetSubscriptionName = types.StringValue(plan.TargetSubscriptionName.ValueString())
+	}
+	plan.SubscriptionId = types.StringValue(*sub.Name)
+
+	diags = resp.State.Set(ctx, plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 }
 
 // Delete deletes the resource and removes the Terraform state on success.
