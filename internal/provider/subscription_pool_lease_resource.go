@@ -33,12 +33,13 @@ type subscriptionPoolLeaseResource struct {
 }
 
 type subscriptionPoolLeaseResourceModel struct {
-	PoolManagementGroupName     types.String `tfsdk:"pool_management_group_name"`
-	PoolSubscriptionPrefix      types.String `tfsdk:"pool_subscription_prefix"`
-	TargetManagementGroupName   types.String `tfsdk:"target_management_group_name"`
-	TargetSubscriptionName      types.String `tfsdk:"target_subscription_name"`
-	SubscriptionId              types.String `tfsdk:"subscription_id"`
-	ActualParentManagementGroup types.String `tfsdk:"actual_parant_management_group"`
+	PoolManagementGroupName      types.String `tfsdk:"pool_management_group_name"`
+	PoolSubscriptionPrefix       types.String `tfsdk:"pool_subscription_prefix"`
+	TargetManagementGroupName    types.String `tfsdk:"target_management_group_name"`
+	TargetSubscriptionName       types.String `tfsdk:"target_subscription_name"`
+	SubscriptionId               types.String `tfsdk:"subscription_id"`
+	FullyQualifiedSubscriptionId types.String `tfsdk:"fully_qualified_subscription_id"`
+	ActualParentManagementGroup  types.String `tfsdk:"actual_parant_management_group"`
 }
 
 // Metadata returns the resource type name.
@@ -63,6 +64,12 @@ func (r *subscriptionPoolLeaseResource) Schema(_ context.Context, _ resource.Sch
 				Required: true,
 			},
 			"subscription_id": schema.StringAttribute{
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"fully_qualified_subscription_id": schema.StringAttribute{
 				Computed: true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -151,6 +158,7 @@ root:
 		return
 	}
 	plan.SubscriptionId = types.StringValue(*matchingSubscription.Name)
+	plan.FullyQualifiedSubscriptionId = types.StringValue(*matchingSubscription.ID)
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
@@ -195,6 +203,8 @@ root:
 	}
 	state.ActualParentManagementGroup = types.StringValue(strings.TrimPrefix(*matchingEntity.Properties.Parent.ID, "/providers/Microsoft.Management/managementGroups/"))
 	state.TargetSubscriptionName = types.StringValue(*matchingEntity.Properties.DisplayName)
+	state.SubscriptionId = types.StringValue(*matchingEntity.Name)
+	state.FullyQualifiedSubscriptionId = types.StringValue(*matchingEntity.ID)
 
 	// Set refreshed state
 	diags = resp.State.Set(ctx, &state)
@@ -255,6 +265,7 @@ func (r *subscriptionPoolLeaseResource) Update(ctx context.Context, req resource
 		plan.TargetSubscriptionName = types.StringValue(plan.TargetSubscriptionName.ValueString())
 	}
 	plan.SubscriptionId = types.StringValue(*sub.Name)
+	plan.FullyQualifiedSubscriptionId = types.StringValue(*sub.ID)
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
