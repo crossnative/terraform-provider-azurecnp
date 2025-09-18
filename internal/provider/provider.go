@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"os"
+	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/managementgroups/armmanagementgroups"
@@ -38,9 +39,11 @@ type azurecnProvider struct {
 }
 
 type azurecnProviderModel struct {
-	TenantId     types.String `tfsdk:"tenant_id"`
-	ClientId     types.String `tfsdk:"client_id"`
-	ClientSecret types.String `tfsdk:"client_secret"`
+	TenantId                   types.String `tfsdk:"tenant_id"`
+	ClientId                   types.String `tfsdk:"client_id"`
+	ClientSecret               types.String `tfsdk:"client_secret"`
+	PoolManagementGroup        types.String `tfsdk:"subscription_pool_management_group"`
+	PoolSubscriptionNamePrefix types.String `tfsdk:"subscription_pool_name_prefix"`
 }
 
 // Metadata returns the provider type name.
@@ -62,6 +65,12 @@ func (p *azurecnProvider) Schema(_ context.Context, _ provider.SchemaRequest, re
 			"client_secret": schema.StringAttribute{
 				Optional:  true,
 				Sensitive: true,
+			},
+			"subscription_pool_management_group": schema.StringAttribute{
+				Optional: true,
+			},
+			"subscription_pool_name_prefix": schema.StringAttribute{
+				Optional: true,
 			},
 		},
 	}
@@ -107,6 +116,22 @@ func (p *azurecnProvider) Configure(ctx context.Context, req provider.ConfigureR
 		)
 	}
 
+	if config.ClientSecret.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("subscription_pool_management_group"),
+			"Unknown subscription_pool_management_group",
+			"We require the source management group on provider configuration to avoid race conditions during the apply.",
+		)
+	}
+
+	if config.ClientSecret.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("subscription_pool_name_prefix"),
+			"Unknown subscription_pool_name_prefix",
+			"We require the subscription prefix on provider configuration to avoid race conditions during the apply.",
+		)
+	}
+
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -117,6 +142,8 @@ func (p *azurecnProvider) Configure(ctx context.Context, req provider.ConfigureR
 	tenantId := os.Getenv("ARM_TENANT_ID")
 	clientId := os.Getenv("ARM_CLIENT_ID")
 	clientSecret := os.Getenv("ARM_CLIENT_SECRET")
+	poolManagementGroupId := "Crossnative"
+	poolSubscriptionPrefix := "Azure_Subscription_Crossnative_Pool_"
 
 	if !config.TenantId.IsNull() {
 		tenantId = config.TenantId.ValueString()
@@ -128,6 +155,14 @@ func (p *azurecnProvider) Configure(ctx context.Context, req provider.ConfigureR
 
 	if !config.ClientSecret.IsNull() {
 		clientSecret = config.ClientSecret.ValueString()
+	}
+
+	if !config.PoolManagementGroup.IsNull() {
+		poolManagementGroupId = config.PoolManagementGroup.ValueString()
+	}
+
+	if !config.PoolSubscriptionNamePrefix.IsNull() {
+		poolSubscriptionPrefix = config.PoolSubscriptionNamePrefix.ValueString()
 	}
 
 	// If any of the expected configurations are missing, return
@@ -193,14 +228,26 @@ func (p *azurecnProvider) Configure(ctx context.Context, req provider.ConfigureR
 		return
 	}
 
-	var holder = ClientFactoryHolder{
+	availableSubscription, err := findAvailableSubscriptions(managementGroupFactory, poolManagementGroupId, poolSubscriptionPrefix)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Failed while fetching subsciption pool content",
+			err.Error(),
+		)
+		return
+	}
+
+	var client = BaseClient{
 		managementGroupClientFactory: managementGroupFactory,
 		subscriptionClientFactory:    subscrioptionFactory,
+		availableSubscriptions:       availableSubscription,
+		poolManagementGroupId:        poolManagementGroupId,
+		poolSubscriptionPrefix:       poolSubscriptionPrefix,
 	}
 	// Make the HashiCups client available during DataSource and Resource
 	// type Configure methods.
-	resp.DataSourceData = &holder
-	resp.ResourceData = &holder
+	resp.DataSourceData = &client
+	resp.ResourceData = &client
 }
 
 // DataSources defines the data sources implemented in the provider.
@@ -215,7 +262,27 @@ func (p *azurecnProvider) Resources(_ context.Context) []func() resource.Resourc
 	}
 }
 
-type ClientFactoryHolder struct { //TODO there gotta be a better way to move the client factories around
-	managementGroupClientFactory *armmanagementgroups.ClientFactory
-	subscriptionClientFactory    *armsubscription.ClientFactory
+func findAvailableSubscriptions(clientFactory *armmanagementgroups.ClientFactory, managementGroupId string, subscriptionPrefix string) (chan string, error) {
+	subscriptionPager := clientFactory.NewManagementGroupSubscriptionsClient().NewGetSubscriptionsUnderManagementGroupPager(managementGroupId, nil)
+	var matchingSubscriptions []string
+
+	for subscriptionPager.More() {
+		page, err := subscriptionPager.NextPage(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		for _, sub := range page.Value {
+			if strings.HasPrefix(*sub.Properties.DisplayName, subscriptionPrefix) {
+				matchingSubscriptions = append(matchingSubscriptions, *sub.Name)
+			}
+		}
+	}
+
+	resultChannel := make(chan string, len(matchingSubscriptions))
+	for _, subscriptionId := range matchingSubscriptions {
+		resultChannel <- subscriptionId
+	}
+
+	close(resultChannel)
+	return resultChannel, nil
 }

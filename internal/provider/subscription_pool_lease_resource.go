@@ -29,12 +29,10 @@ func NewSubscriptionPoolLeaseResource() resource.Resource {
 
 // subscriptionPoolLeaseResource is the resource implementation.
 type subscriptionPoolLeaseResource struct {
-	clientFactoryHolder *ClientFactoryHolder
+	baseClient *BaseClient
 }
 
 type subscriptionPoolLeaseResourceModel struct {
-	PoolManagementGroupName      types.String `tfsdk:"pool_management_group_name"`
-	PoolSubscriptionPrefix       types.String `tfsdk:"pool_subscription_prefix"`
 	TargetManagementGroupName    types.String `tfsdk:"target_management_group_name"`
 	TargetSubscriptionName       types.String `tfsdk:"target_subscription_name"`
 	SubscriptionId               types.String `tfsdk:"subscription_id"`
@@ -51,12 +49,6 @@ func (r *subscriptionPoolLeaseResource) Metadata(_ context.Context, req resource
 func (r *subscriptionPoolLeaseResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
-			"pool_management_group_name": schema.StringAttribute{
-				Required: true,
-			},
-			"pool_subscription_prefix": schema.StringAttribute{
-				Required: true,
-			},
 			"target_management_group_name": schema.StringAttribute{
 				Required: true,
 			},
@@ -90,18 +82,18 @@ func (r *subscriptionPoolLeaseResource) Configure(_ context.Context, req resourc
 		return
 	}
 
-	clientFactory, ok := req.ProviderData.(*ClientFactoryHolder)
+	baseClient, ok := req.ProviderData.(*BaseClient)
 
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Unexpected Data Source Configure Type",
-			fmt.Sprintf("Expected *provider.ClientFactoryHolder, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+			fmt.Sprintf("Expected *provider.BaseClient, got: %T. Please report this issue to the provider developers.", req.ProviderData),
 		)
 
 		return
 	}
 
-	r.clientFactoryHolder = clientFactory
+	r.baseClient = baseClient
 }
 
 // Create a new resource.
@@ -114,34 +106,18 @@ func (r *subscriptionPoolLeaseResource) Create(ctx context.Context, req resource
 		return
 	}
 
-	prefix := plan.PoolSubscriptionPrefix.ValueString()
+	subscriptionId := <-r.baseClient.availableSubscriptions
 
-	subscriptionPager := r.clientFactoryHolder.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().NewGetSubscriptionsUnderManagementGroupPager(plan.PoolManagementGroupName.ValueString(), nil)
-	var matchingSubscription *armmanagementgroups.SubscriptionUnderManagementGroup
-root:
-	for subscriptionPager.More() {
-		page, err := subscriptionPager.NextPage(context.Background())
-		if err != nil {
-			resp.Diagnostics.AddError("Failed fetching Subscriptions from Pool", err.Error())
-			return
-		}
-		for _, sub := range page.Value {
-			if strings.HasPrefix(*sub.Properties.DisplayName, prefix) {
-				matchingSubscription = sub
-				break root
-			}
-		}
-	}
-	if matchingSubscription == nil {
+	if subscriptionId == "" {
 		resp.Diagnostics.AddError(
 			"Didn't find any available Subscription",
-			fmt.Sprintf("Searched for subscriptions with prefix '%s' in ManagementGroup '%s'", prefix, plan.PoolManagementGroupName.ValueString()),
+			fmt.Sprintf("Searched for subscriptions with prefix '%s' in ManagementGroup '%s'", r.baseClient.poolSubscriptionPrefix, r.baseClient.poolManagementGroupId),
 		)
 		return
 	}
 
 	// Associate Subscription
-	_, err := r.clientFactoryHolder.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().Create(context.Background(), plan.TargetManagementGroupName.ValueString(), *matchingSubscription.Name, nil)
+	associationResponse, err := r.baseClient.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().Create(context.Background(), plan.TargetManagementGroupName.ValueString(), subscriptionId, nil)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error moving subscription", err.Error(),
@@ -150,15 +126,15 @@ root:
 	}
 	plan.ActualParentManagementGroup = types.StringValue(plan.TargetManagementGroupName.ValueString())
 
-	_, err = r.clientFactoryHolder.subscriptionClientFactory.NewClient().Rename(context.Background(), *matchingSubscription.Name, armsubscription.Name{SubscriptionName: plan.TargetSubscriptionName.ValueStringPointer()}, nil)
+	_, err = r.baseClient.subscriptionClientFactory.NewClient().Rename(context.Background(), subscriptionId, armsubscription.Name{SubscriptionName: plan.TargetSubscriptionName.ValueStringPointer()}, nil)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error renaming subscription", err.Error(),
 		)
 		return
 	}
-	plan.SubscriptionId = types.StringValue(*matchingSubscription.Name)
-	plan.FullyQualifiedSubscriptionId = types.StringValue(*matchingSubscription.ID)
+	plan.SubscriptionId = types.StringValue(subscriptionId)
+	plan.FullyQualifiedSubscriptionId = types.StringValue(*associationResponse.ID)
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
@@ -178,7 +154,7 @@ func (r *subscriptionPoolLeaseResource) Read(ctx context.Context, req resource.R
 		return
 	}
 
-	pager := r.clientFactoryHolder.managementGroupClientFactory.NewEntitiesClient().NewListPager(nil)
+	pager := r.baseClient.managementGroupClientFactory.NewEntitiesClient().NewListPager(nil)
 	var matchingEntity *armmanagementgroups.EntityInfo
 root:
 	for pager.More() {
@@ -230,7 +206,7 @@ func (r *subscriptionPoolLeaseResource) Update(ctx context.Context, req resource
 		return
 	}
 
-	sub, err := r.clientFactoryHolder.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().GetSubscription(context.Background(), state.ActualParentManagementGroup.ValueString(), state.SubscriptionId.ValueString(), nil)
+	sub, err := r.baseClient.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().GetSubscription(context.Background(), state.ActualParentManagementGroup.ValueString(), state.SubscriptionId.ValueString(), nil)
 	if err != nil {
 		//TODO check for 404 or differente error
 		resp.Diagnostics.AddError(
@@ -241,7 +217,7 @@ func (r *subscriptionPoolLeaseResource) Update(ctx context.Context, req resource
 	}
 
 	if state.ActualParentManagementGroup.ValueString() != plan.TargetManagementGroupName.ValueString() {
-		_, err := r.clientFactoryHolder.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().Create(ctx, plan.TargetManagementGroupName.ValueString(), *sub.Name, nil)
+		_, err := r.baseClient.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().Create(ctx, plan.TargetManagementGroupName.ValueString(), *sub.Name, nil)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Error during Subscription Move",
@@ -253,7 +229,7 @@ func (r *subscriptionPoolLeaseResource) Update(ctx context.Context, req resource
 	plan.ActualParentManagementGroup = types.StringValue(plan.TargetManagementGroupName.ValueString())
 
 	if plan.TargetSubscriptionName.ValueString() != *sub.Properties.DisplayName {
-		_, err := r.clientFactoryHolder.subscriptionClientFactory.NewClient().Rename(context.Background(), state.SubscriptionId.ValueString(), armsubscription.Name{SubscriptionName: plan.TargetSubscriptionName.ValueStringPointer()}, nil)
+		_, err := r.baseClient.subscriptionClientFactory.NewClient().Rename(context.Background(), state.SubscriptionId.ValueString(), armsubscription.Name{SubscriptionName: plan.TargetSubscriptionName.ValueStringPointer()}, nil)
 		if err != nil {
 			//TODO handle retry on 429
 			resp.Diagnostics.AddError(
@@ -283,7 +259,7 @@ func (r *subscriptionPoolLeaseResource) Delete(ctx context.Context, req resource
 		return
 	}
 
-	_, err := r.clientFactoryHolder.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().Create(context.Background(), state.PoolManagementGroupName.ValueString(), state.SubscriptionId.ValueString(), nil)
+	_, err := r.baseClient.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().Create(context.Background(), r.baseClient.poolManagementGroupId, state.SubscriptionId.ValueString(), nil)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error during Subscription Move",
@@ -292,8 +268,8 @@ func (r *subscriptionPoolLeaseResource) Delete(ctx context.Context, req resource
 		return
 	}
 
-	newSubscriptionName := truncateString(state.PoolSubscriptionPrefix.ValueString()+state.SubscriptionId.ValueString(), 64)
-	_, err = r.clientFactoryHolder.subscriptionClientFactory.NewClient().Rename(context.Background(), state.SubscriptionId.ValueString(), armsubscription.Name{SubscriptionName: &newSubscriptionName}, nil)
+	newSubscriptionName := truncateString(r.baseClient.poolSubscriptionPrefix+state.SubscriptionId.ValueString(), 64)
+	_, err = r.baseClient.subscriptionClientFactory.NewClient().Rename(context.Background(), state.SubscriptionId.ValueString(), armsubscription.Name{SubscriptionName: &newSubscriptionName}, nil)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error during Subscription Rename",
