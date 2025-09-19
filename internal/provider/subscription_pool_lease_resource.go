@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/managementgroups/armmanagementgroups"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -117,7 +115,7 @@ func (r *subscriptionPoolLeaseResource) Create(ctx context.Context, req resource
 	}
 
 	// Associate Subscription
-	associationResponse, err := r.baseClient.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().Create(context.Background(), plan.TargetManagementGroupName.ValueString(), subscriptionId, nil)
+	associationResponse, err := r.baseClient.MoveSubscription(subscriptionId, plan.TargetManagementGroupName.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error moving subscription", err.Error(),
@@ -126,7 +124,7 @@ func (r *subscriptionPoolLeaseResource) Create(ctx context.Context, req resource
 	}
 	plan.ActualParentManagementGroup = types.StringValue(plan.TargetManagementGroupName.ValueString())
 
-	_, err = r.baseClient.subscriptionClientFactory.NewClient().Rename(context.Background(), subscriptionId, armsubscription.Name{SubscriptionName: plan.TargetSubscriptionName.ValueStringPointer()}, nil)
+	_, err = r.baseClient.RenameSubscription(subscriptionId, plan.TargetSubscriptionName.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error renaming subscription", err.Error(),
@@ -154,26 +152,11 @@ func (r *subscriptionPoolLeaseResource) Read(ctx context.Context, req resource.R
 		return
 	}
 
-	pager := r.baseClient.managementGroupClientFactory.NewEntitiesClient().NewListPager(nil)
-	var matchingEntity *armmanagementgroups.EntityInfo
-root:
-	for pager.More() {
-		page, err := pager.NextPage(context.Background())
-		if err != nil {
-			resp.Diagnostics.AddError("Failed fetching entities", err.Error())
-			return
-		}
-		for _, entityInfo := range page.Value {
-			if *entityInfo.Type == "/subscriptions" && *entityInfo.Name == state.SubscriptionId.ValueString() {
-				matchingEntity = entityInfo
-				break root
-			}
-		}
-	}
-	if matchingEntity == nil {
+	matchingEntity, err := r.baseClient.ReadSubscriptionState(state.SubscriptionId.ValueString())
+	if err != nil {
 		resp.Diagnostics.AddError(
 			"Couldn't find managed subscription",
-			fmt.Sprintf("Couldn't find managed subscription: %s", state.SubscriptionId.ValueString()),
+			err.Error(),
 		)
 		return
 	}
@@ -217,7 +200,7 @@ func (r *subscriptionPoolLeaseResource) Update(ctx context.Context, req resource
 	}
 
 	if state.ActualParentManagementGroup.ValueString() != plan.TargetManagementGroupName.ValueString() {
-		_, err := r.baseClient.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().Create(ctx, plan.TargetManagementGroupName.ValueString(), *sub.Name, nil)
+		_, err := r.baseClient.MoveSubscription(plan.TargetManagementGroupName.ValueString(), *sub.Name)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Error during Subscription Move",
@@ -229,7 +212,7 @@ func (r *subscriptionPoolLeaseResource) Update(ctx context.Context, req resource
 	plan.ActualParentManagementGroup = types.StringValue(plan.TargetManagementGroupName.ValueString())
 
 	if plan.TargetSubscriptionName.ValueString() != *sub.Properties.DisplayName {
-		_, err := r.baseClient.subscriptionClientFactory.NewClient().Rename(context.Background(), state.SubscriptionId.ValueString(), armsubscription.Name{SubscriptionName: plan.TargetSubscriptionName.ValueStringPointer()}, nil)
+		_, err := r.baseClient.RenameSubscription(state.SubscriptionId.ValueString(), plan.TargetSubscriptionName.ValueString())
 		if err != nil {
 			//TODO handle retry on 429
 			resp.Diagnostics.AddError(
@@ -259,7 +242,7 @@ func (r *subscriptionPoolLeaseResource) Delete(ctx context.Context, req resource
 		return
 	}
 
-	_, err := r.baseClient.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().Create(context.Background(), r.baseClient.poolManagementGroupId, state.SubscriptionId.ValueString(), nil)
+	_, err := r.baseClient.MoveSubscription(state.SubscriptionId.ValueString(), r.baseClient.poolManagementGroupId)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error during Subscription Move",
@@ -269,7 +252,7 @@ func (r *subscriptionPoolLeaseResource) Delete(ctx context.Context, req resource
 	}
 
 	newSubscriptionName := truncateString(r.baseClient.poolSubscriptionPrefix+state.SubscriptionId.ValueString(), 64)
-	_, err = r.baseClient.subscriptionClientFactory.NewClient().Rename(context.Background(), state.SubscriptionId.ValueString(), armsubscription.Name{SubscriptionName: &newSubscriptionName}, nil)
+	_, err = r.baseClient.RenameSubscription(state.SubscriptionId.ValueString(), newSubscriptionName)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error during Subscription Rename",
