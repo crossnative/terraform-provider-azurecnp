@@ -48,25 +48,30 @@ func (r *subscriptionPoolLeaseResource) Schema(_ context.Context, _ resource.Sch
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"target_management_group_name": schema.StringAttribute{
-				Required: true,
+				Description: "todo: i just want to finish the initial publication",
+				Required:    true,
 			},
 			"target_subscription_name": schema.StringAttribute{
-				Required: true,
+				Description: "todo: i just want to finish the initial publication",
+				Required:    true,
 			},
 			"subscription_id": schema.StringAttribute{
-				Computed: true,
+				Description: "todo: i just want to finish the initial publication",
+				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"fully_qualified_subscription_id": schema.StringAttribute{
-				Computed: true,
+				Description: "todo: i just want to finish the initial publication",
+				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"actual_parant_management_group": schema.StringAttribute{
-				Computed: true,
+				Description: "todo: i just want to finish the initial publication",
+				Computed:    true,
 			},
 		},
 	}

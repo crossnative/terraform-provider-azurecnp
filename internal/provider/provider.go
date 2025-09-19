@@ -57,20 +57,25 @@ func (p *azurecnProvider) Schema(_ context.Context, _ provider.SchemaRequest, re
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"tenant_id": schema.StringAttribute{
-				Optional: true,
+				Description: "todo: i just want to finish the initial publication",
+				Optional:    true,
 			},
 			"client_id": schema.StringAttribute{
-				Optional: true,
+				Description: "todo: i just want to finish the initial publication",
+				Optional:    true,
 			},
 			"client_secret": schema.StringAttribute{
-				Optional:  true,
-				Sensitive: true,
+				Description: "todo: i just want to finish the initial publication",
+				Optional:    true,
+				Sensitive:   true,
 			},
 			"subscription_pool_management_group": schema.StringAttribute{
-				Optional: true,
+				Description: "todo: i just want to finish the initial publication",
+				Optional:    true,
 			},
 			"subscription_pool_name_prefix": schema.StringAttribute{
-				Optional: true,
+				Description: "todo: i just want to finish the initial publication",
+				Optional:    true,
 			},
 		},
 	}

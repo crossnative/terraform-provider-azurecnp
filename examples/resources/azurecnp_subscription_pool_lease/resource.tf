@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     azurecnp = {
-      source = "hashicorp.com/edu/azurecnp"
+      source = "crossnative/azurecnp"
     }
   }
 }
