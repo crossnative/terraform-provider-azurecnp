@@ -191,7 +191,7 @@ func (r *subscriptionPoolLeaseResource) Update(ctx context.Context, req resource
 
 	sub, err := r.baseClient.managementGroupClientFactory.NewManagementGroupSubscriptionsClient().GetSubscription(context.Background(), state.ActualParentManagementGroup.ValueString(), state.SubscriptionId.ValueString(), nil)
 	if err != nil {
-		//TODO check for 404 or differente error
+		//TODO check for 404 or different error
 		resp.Diagnostics.AddError(
 			"Broken State",
 			fmt.Sprintf("Could not find Subscription '%s' under ManagementGroup '%s'\nAzure API Error: %s", state.SubscriptionId.ValueString(), state.ActualParentManagementGroup.ValueString(), err.Error()),
@@ -267,6 +267,6 @@ func (r *subscriptionPoolLeaseResource) ImportState(ctx context.Context, req res
 	resource.ImportStatePassthroughID(ctx, path.Root("subscription_id"), req, resp)
 }
 
-func truncateString(s string, max int) string {
-	return s[:max]
+func truncateString(s string, maxLength int) string {
+	return s[:maxLength]
 }
