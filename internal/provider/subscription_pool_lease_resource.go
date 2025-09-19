@@ -123,6 +123,8 @@ func (r *subscriptionPoolLeaseResource) Create(ctx context.Context, req resource
 		return
 	}
 	plan.ActualParentManagementGroup = types.StringValue(plan.TargetManagementGroupName.ValueString())
+	plan.SubscriptionId = types.StringValue(subscriptionId)
+	plan.FullyQualifiedSubscriptionId = types.StringValue(*associationResponse.ID)
 
 	_, err = r.baseClient.RenameSubscription(subscriptionId, plan.TargetSubscriptionName.ValueString())
 	if err != nil {
@@ -131,8 +133,6 @@ func (r *subscriptionPoolLeaseResource) Create(ctx context.Context, req resource
 		)
 		return
 	}
-	plan.SubscriptionId = types.StringValue(subscriptionId)
-	plan.FullyQualifiedSubscriptionId = types.StringValue(*associationResponse.ID)
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
@@ -198,6 +198,8 @@ func (r *subscriptionPoolLeaseResource) Update(ctx context.Context, req resource
 		)
 		return
 	}
+	plan.SubscriptionId = types.StringValue(*sub.Name)
+	plan.FullyQualifiedSubscriptionId = types.StringValue(*sub.ID)
 
 	if state.ActualParentManagementGroup.ValueString() != plan.TargetManagementGroupName.ValueString() {
 		_, err := r.baseClient.MoveSubscription(plan.TargetManagementGroupName.ValueString(), *sub.Name)
@@ -223,8 +225,6 @@ func (r *subscriptionPoolLeaseResource) Update(ctx context.Context, req resource
 		}
 		plan.TargetSubscriptionName = types.StringValue(plan.TargetSubscriptionName.ValueString())
 	}
-	plan.SubscriptionId = types.StringValue(*sub.Name)
-	plan.FullyQualifiedSubscriptionId = types.StringValue(*sub.ID)
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
