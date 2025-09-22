@@ -168,7 +168,7 @@ func (r *subscriptionPoolLeaseResource) Read(ctx context.Context, req resource.R
 	state.ActualParentManagementGroup = types.StringValue(strings.TrimPrefix(*matchingEntity.Properties.Parent.ID, "/providers/Microsoft.Management/managementGroups/"))
 	state.TargetSubscriptionName = types.StringValue(*matchingEntity.Properties.DisplayName)
 	state.SubscriptionId = types.StringValue(*matchingEntity.Name)
-	state.FullyQualifiedSubscriptionId = types.StringValue(*matchingEntity.ID)
+	state.FullyQualifiedSubscriptionId = types.StringValue(*matchingEntity.Properties.Parent.ID + *matchingEntity.ID)
 
 	// Set refreshed state
 	diags = resp.State.Set(ctx, &state)
