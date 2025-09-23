@@ -34,6 +34,7 @@ type subscriptionPoolLeaseResourceModel struct {
 	TargetManagementGroupName    types.String `tfsdk:"target_management_group_name"`
 	TargetSubscriptionName       types.String `tfsdk:"target_subscription_name"`
 	SubscriptionId               types.String `tfsdk:"subscription_id"`
+	QualifiedSubscriptionId      types.String `tfsdk:"qualified_subscription_id"`
 	FullyQualifiedSubscriptionId types.String `tfsdk:"fully_qualified_subscription_id"`
 	ActualParentManagementGroup  types.String `tfsdk:"actual_parant_management_group"`
 }
@@ -48,29 +49,36 @@ func (r *subscriptionPoolLeaseResource) Schema(_ context.Context, _ resource.Sch
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"target_management_group_name": schema.StringAttribute{
-				Description: "todo: i just want to finish the initial publication",
+				Description: "the ID; either a GUID or a named ID",
 				Required:    true,
 			},
 			"target_subscription_name": schema.StringAttribute{
-				Description: "todo: i just want to finish the initial publication",
+				Description: "the desired name of the subscription",
 				Required:    true,
 			},
 			"subscription_id": schema.StringAttribute{
-				Description: "todo: i just want to finish the initial publication",
+				Description: "like: 00000000-0000-0000-0000-000000000000",
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"qualified_subscription_id": schema.StringAttribute{
+				Description: "like: /subscriptions/00000000-0000-0000-0000-000000000000",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"fully_qualified_subscription_id": schema.StringAttribute{
-				Description: "todo: i just want to finish the initial publication",
+				Description: "like: /providers/Microsoft.Management/managementGroups/00000000-0000-0000-0000-000000000000/subscriptions/00000000-0000-0000-0000-000000000000",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"actual_parant_management_group": schema.StringAttribute{
-				Description: "todo: i just want to finish the initial publication",
+				Description: "like: /providers/Microsoft.Management/managementGroups/00000000-0000-0000-0000-000000000000",
 				Computed:    true,
 			},
 		},
@@ -129,6 +137,7 @@ func (r *subscriptionPoolLeaseResource) Create(ctx context.Context, req resource
 	}
 	plan.ActualParentManagementGroup = types.StringValue(plan.TargetManagementGroupName.ValueString())
 	plan.SubscriptionId = types.StringValue(subscriptionId)
+	plan.QualifiedSubscriptionId = types.StringValue(strings.TrimPrefix(*associationResponse.ID, *associationResponse.Properties.Parent.ID))
 	plan.FullyQualifiedSubscriptionId = types.StringValue(*associationResponse.ID)
 
 	_, err = r.baseClient.RenameSubscription(subscriptionId, plan.TargetSubscriptionName.ValueString())
@@ -168,6 +177,7 @@ func (r *subscriptionPoolLeaseResource) Read(ctx context.Context, req resource.R
 	state.ActualParentManagementGroup = types.StringValue(strings.TrimPrefix(*matchingEntity.Properties.Parent.ID, "/providers/Microsoft.Management/managementGroups/"))
 	state.TargetSubscriptionName = types.StringValue(*matchingEntity.Properties.DisplayName)
 	state.SubscriptionId = types.StringValue(*matchingEntity.Name)
+	state.SubscriptionId = types.StringValue(*matchingEntity.ID)
 	state.FullyQualifiedSubscriptionId = types.StringValue(*matchingEntity.Properties.Parent.ID + *matchingEntity.ID)
 
 	// Set refreshed state
@@ -204,6 +214,7 @@ func (r *subscriptionPoolLeaseResource) Update(ctx context.Context, req resource
 		return
 	}
 	plan.SubscriptionId = types.StringValue(*sub.Name)
+	plan.QualifiedSubscriptionId = types.StringValue(strings.TrimPrefix(*sub.ID, *sub.Properties.Parent.ID))
 	plan.FullyQualifiedSubscriptionId = types.StringValue(*sub.ID)
 
 	if state.ActualParentManagementGroup.ValueString() != plan.TargetManagementGroupName.ValueString() {
